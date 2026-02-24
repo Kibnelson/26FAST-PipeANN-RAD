@@ -4,7 +4,7 @@ set -euo pipefail
 # =========================
 # Config (override via env)
 # =========================
-REPO_URL="${REPO_URL:-https://github.com/MachineLearningSystem/26FAST-PipeANN.git}"
+REPO_URL="${REPO_URL:-https://github.com/Kibnelson/26FAST-PipeANN-RAD.git}"
 REPO_DIR="${REPO_DIR:-$HOME/26FAST-PipeANN}"
 
 NVME_DEV="${NVME_DEV:-/dev/nvme1n1}"
