@@ -1,5 +1,6 @@
 #include "aligned_file_reader.h"
 #include "libcuckoo/cuckoohash_map.hh"
+#include "observability.h"
 #include "ssd_index.h"
 #include <malloc.h>
 #include <algorithm>
@@ -27,6 +28,7 @@ namespace pipeann {
                                         const std::vector<TagT> &deleted_nodes,
                                         const tsl::robin_set<TagT> &deleted_nodes_set, uint32_t nthreads,
                                         const uint32_t &n_sampled_nbrs) {
+    pipeann::set_io_context(pipeann::IoContext::COMPACTION);
     if (nthreads == 0) {
       nthreads = this->max_nthreads;
     }

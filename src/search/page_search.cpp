@@ -1,10 +1,12 @@
 #include "aligned_file_reader.h"
 #include "libcuckoo/cuckoohash_map.hh"
+#include "observability.h"
 #include "ssd_index.h"
 #include <malloc.h>
 #include <algorithm>
 #include <filesystem>
-
+#include <cstdint>
+#include <iostream>
 #include <omp.h>
 #include <chrono>
 #include <cmath>
@@ -103,6 +105,12 @@ namespace pipeann {
   template<typename T, typename TagT>
   size_t SSDIndex<T, TagT>::page_search(const T *query1, const _u64 k_search, const _u32 mem_L, const _u64 l_search,
                                         TagT *res_tags, float *distances, const _u64 beam_width, QueryStats *stats) {
+    pipeann::set_io_context(pipeann::IoContext::SEARCH);
+    PIPANN_PROBE_QUERY_START(l_search);
+
+    std::cout << "[observability] -------> page_search" << std::endl;
+
+
     QueryBuffer<T> *query_buf = pop_query_buf(query1);
     void *ctx = reader->get_ctx();
 
@@ -271,6 +279,7 @@ namespace pipeann {
         for (_u64 i = 0; i < frontier.size(); i++) {
           auto id = frontier[i];
           uint64_t page_id = id2page(id);
+          PIPANN_PROBE_EXPAND_NODE(id, page_id);
           auto buf = sector_scratch + sector_scratch_idx * size_per_io;
           PageArr layout;
           if (unlikely(!page_layout.find(page_id, layout))) {
@@ -382,6 +391,10 @@ namespace pipeann {
       t++;
     }
 
+    PIPANN_PROBE_QUERY_DONE(
+        (uint64_t) query_timer.elapsed(),
+        stats != nullptr ? (uint64_t) stats->n_ios : 0,
+        stats != nullptr ? (uint64_t) stats->n_hops : 0);
     push_query_buf(query_buf);
 
     if (stats != nullptr) {

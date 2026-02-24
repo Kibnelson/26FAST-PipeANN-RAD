@@ -1,5 +1,6 @@
 #include "aligned_file_reader.h"
 #include "libcuckoo/cuckoohash_map.hh"
+#include "observability.h"
 #include "ssd_index.h"
 #include <malloc.h>
 #include <algorithm>
@@ -27,6 +28,12 @@ namespace pipeann {
                                          tsl::robin_map<uint32_t, T *> *coord_map, QueryStats *stats,
                                          tsl::robin_set<uint32_t> *exclude_nodes /* tags */, bool dyn_search_l,
                                          std::vector<uint64_t> *passthrough_page_ref) {
+    pipeann::set_io_context(pipeann::IoContext::SEARCH);
+    PIPANN_PROBE_QUERY_START(l_search);
+
+    std::cout << "[observability] -------> beam earch" << std::endl;
+
+
     uint32_t original_l_search = l_search;
     auto diskSearchBegin = std::chrono::high_resolution_clock::now();
 
@@ -139,7 +146,9 @@ namespace pipeann {
         for (_u64 i = 0; i < frontier.size(); i++) {
           uint32_t id = frontier[i];
           uint32_t loc = this->id2loc(id);
-          uint64_t offset = loc_sector_no(loc) * SECTOR_LEN;
+          uint32_t page_id = loc_sector_no(loc);
+          PIPANN_PROBE_EXPAND_NODE(id, page_id);
+          uint64_t offset = page_id * SECTOR_LEN;
           auto sector_buf = sector_scratch + sector_scratch_idx * size_per_io;
           fnhood_t fnhood = std::make_tuple(id, loc, sector_buf);
           sector_scratch_idx++;
@@ -278,6 +287,10 @@ namespace pipeann {
       reader->deref(&page_ref, ctx);
     }
 
+    PIPANN_PROBE_QUERY_DONE(
+        (uint64_t) query_timer.elapsed(),
+        stats != nullptr ? (uint64_t) stats->n_ios : 0,
+        0);
     push_query_buf(query_buf);
 
     if (stats != nullptr) {

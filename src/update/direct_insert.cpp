@@ -1,5 +1,6 @@
 #include "aligned_file_reader.h"
 #include "libcuckoo/cuckoohash_map.hh"
+#include "observability.h"
 #include "ssd_index.h"
 #include <malloc.h>
 #include <algorithm>
@@ -257,6 +258,7 @@ namespace pipeann {
 
   template<class T, class TagT>
   void SSDIndex<T, TagT>::bg_io_thread() {
+    pipeann::set_io_context(pipeann::IoContext::INSERT);
     auto ctx = reader->get_ctx();
     uint8_t *buf = nullptr;
     pipeann::alloc_aligned((void **) &buf, (MAX_N_EDGES + 1) * SECTOR_LEN, SECTOR_LEN);

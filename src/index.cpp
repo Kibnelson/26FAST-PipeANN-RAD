@@ -22,6 +22,7 @@
 #include <time.h>
 
 #include "index.h"
+#include "graph_stats.h"
 #include "parameters.h"
 #include "timer.h"
 #include "utils.h"
@@ -990,6 +991,12 @@ namespace pipeann {
                 << "  min:" << min << "  count(deg<2):" << cnt;
     }
     _width = (std::max)((unsigned) max, _width);
+    if (_nd + _num_frozen_pts > 0) {
+      GraphStats gs = compute_graph_stats(_final_graph, _nd, _num_frozen_pts, _ep, 2);
+      std::ostringstream oss;
+      print_graph_report(gs, oss);
+      LOG(INFO) << oss.str();
+    }
     _has_built = true;
   }
 
@@ -1073,6 +1080,12 @@ namespace pipeann {
                 << "  min:" << min << "  count(deg<2):" << cnt;
     }
     _width = (std::max)((unsigned) max, _width);
+    if (_nd + _num_frozen_pts > 0) {
+      GraphStats gs = compute_graph_stats(_final_graph, _nd, _num_frozen_pts, _ep, 2);
+      std::ostringstream oss;
+      print_graph_report(gs, oss);
+      LOG(INFO) << oss.str();
+    }
     _has_built = true;
   }
 

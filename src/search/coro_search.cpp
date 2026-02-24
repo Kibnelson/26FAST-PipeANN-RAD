@@ -1,5 +1,6 @@
 #include "aligned_file_reader.h"
 #include "libcuckoo/cuckoohash_map.hh"
+#include "observability.h"
 #include "ssd_index.h"
 #include <malloc.h>
 #include <algorithm>
@@ -51,6 +52,9 @@ namespace pipeann {
 
       SSDIndex<T> *parent;
       unsigned cur_list_size, cmps, k;
+
+      // std::cout << "beamwidth to be optimized for each L value" << std::endl;
+
 
       void compute_dists(const unsigned *ids, const _u64 n_ids, float *dists_out) {
         ::aggregate_coords(ids, n_ids, parent->data.data(), parent->n_chunks, pq_coord_scratch);
@@ -217,6 +221,8 @@ namespace pipeann {
       LOG(INFO) << "Unsupported yet";
       exit(-1);
     }
+
+    pipeann::set_io_context(pipeann::IoContext::SEARCH);
 
     // do not use the thread data's buf.
     QueryBuffer<T> *thread_data = pop_query_buf(queries[0]);

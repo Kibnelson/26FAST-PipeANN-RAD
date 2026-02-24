@@ -59,7 +59,7 @@ make -j
 Then, build PipeANN.
 
 ```bash
-bash ./build.sh
+bash ./build.sh -DPIPANN_OBSERVABILITY=ON
 ```
 
 ## Quick Start (Search-Only)
@@ -393,6 +393,74 @@ In each cell, set the variable `USE_EXAMPLE` to `True` to use our provided examp
 
 ### Appendix
 
+#### Graph observability (Instrumentation 1)
+
+Instrumentation 1 is a graph-structure observability layer that answers: *"What graph did we actually build and save?"*
+
+**What it reports (per index):**
+
+- Total node count; active vs auxiliary/frozen node count
+- Total directed edges
+- Degree distribution: min / average / max neighbors per node
+- Number of weak nodes (degree &lt; 2)
+- Entry-point node ID
+- Optional: sample of per-node neighbor lists for manual inspection
+
+**Build-time summary:** After each index build, the same report is logged once (e.g. search log output for `Graph structure summary:`). You see structural quality as soon as an index is produced.
+
+**Saved-index inspection:** To verify what is on disk without loading the full index, use the `inspect_graph` tool. It supports:
+
+- **On-disk SSD index** (`*_disk.index`): use `--disk-index` and `--data-type` (float | uint8 | int8).
+- **Raw graph file** (as written by save_graph at offset 0): use `--graph-file`.
+- **Single-file unified index** (saved with save_as_one_file): use `--index-file`.
+
+```bash
+# On-disk SSD index. --data-type must match build_disk_index: float if you built from .fvecs/fvecs_to_bin (e.g. siftsmall), uint8 for SIFT byte data, int8 for SPACEV.
+build/tests/inspect_graph --disk-index /mnt/nvme/indices/siftsmall/siftsmall_disk.index --data-type float
+
+# Raw graph file (standalone graph as written by save_graph at offset 0)
+build/tests/inspect_graph --graph-file /path/to/graphfile
+
+# Single-file unified index (graph at 4KB offset)
+build/tests/inspect_graph --index-file /path/to/onefile.index
+
+# With adjacency sample: first N nodes, each line "node_id: [n1, n2, ...]"
+build/tests/inspect_graph --disk-index /path/to/idx_disk.index --data-type uint8 --adjacency-sample 20 --max-neighbors 20
+
+# Small graph: first N nodes with out-neighbors and "referenced by" (which of those N nodes point to each node)
+build/tests/inspect_graph --disk-index /path/to/idx_disk.index --data-type float --small-graph 20 --max-neighbors 20
+```
+
+
+<!-- build/tests/inspect_graph --disk-index /mnt/nvme/indices/siftsmall/siftsmall_disk.index --data-type uint8 --adjacency-sample 20 --max-neighbors 20
+build/tests/inspect_graph --disk-index /mnt/nvme/indices/siftsmall/siftsmall_disk.index --data-type uint8
+ -->
+
+
+For a small test (e.g. 1,000 documents), you can confirm: expected node count (~1,000 plus one frozen if enabled), neighbor counts bounded by configured R, no unexpected disconnected nodes, and a sensible degree average. Use `--adjacency-sample 20` (and optionally `--max-neighbors 20`) to view the first 20 nodes’ neighbor lists for manual inspection.
+
+**Observability (eBPF):** To correlate query latency with kernel I/O (cache vs disk, NVMe queueing) and graph-walk (expansions, tier hit/miss), see [docs/observability.md](docs/observability.md). The engine stamps I/O context (SEARCH, INSERT, COMPACTION) and supports optional USDT probes. To enable probes: install `systemtap-sdt-dev`, then reconfigure and build with `-DPIPANN_OBSERVABILITY=ON` (full steps and bpftrace examples are in the observability doc).
+
+- **Concepts (see doc for full definitions):** A **page** is a 4 KB sector of the graph (nodes + adjacency). **queries** = number of search invocations; **expansions** = node expansions (graph nodes “opened”); **tier_hit** = pages served from in-process cache; **tier_miss** = pages read from disk (can be many per query). **@by_page[page_id]** = how many expansions touched that page (hot pages).
+
+**R as the stop rule:** The build parameter **R** is the **maximum** out-degree per node. After linking and pruning, every node has **at most** R neighbors (degree ≤ R). In many builds (e.g. with R=64 and enough candidates) every node ends up with exactly R neighbors (degree_min = degree_max = R); in sparser regions or different settings some nodes can have fewer than R.
+
+**How the graph is constructed (code map):** One node per vector (node IDs 0..n-1). [`src/index.cpp`](src/index.cpp) `build()` then `link()`: for each node, approximate NN search collects candidates and `prune_neighbors()` keeps at most R neighbors; result is `_final_graph` (adjacency list). Entry point = medoid or frozen node. On-disk index ([`src/utils/aux_utils.cpp`](src/utils/aux_utils.cpp) `build_disk_index`): each node on disk = `[coords][nnbrs (4B)][neighbor IDs]` in 4KB sectors.
+
+**Entry point (not random):** The entry point is chosen once at the start of `link()` in [`src/index.cpp`](src/index.cpp). If there is a frozen point (`_num_frozen_pts > 0`), `_ep` is set to that node (index `_max_points`). Otherwise it is the **medoid**: the data point closest to the **centroid** of all vectors. The centroid is the mean of all `_nd` vectors; then every point is compared to that centroid (L2 distance), and the one with smallest distance becomes the entry point. So the entry point is deterministic and central in the dataset, not random. See `calculate_entry_point()` (lines 515–562).
+
+**get_expanded_nodes / iterate_to_fixed_point (candidate set and what stops it):** `get_expanded_nodes(node_id, L, init_ids, pool, visited)` finds a candidate set of neighbors for `node_id` by running an approximate nearest-neighbor search on the (partially built) graph, starting from `init_ids` (always the entry point during build). It calls `iterate_to_fixed_point()` with the query = coordinates of `node_id` and `Lsize = L`. Steps:
+
+1. **Initialize:** Put `init_ids` (e.g. entry point) into `best_L_nodes` (size L+1), each with distance to `node_coords`, and sort by distance. Mark them as “to expand” (`flag = true`). A set `inserted_into_pool` avoids duplicates.
+
+2. **How navigation proceeds (best-first, not BFS):** We do **not** “expand all entry-point neighbors, then all their neighbors”. We always expand **the node in the list that is closest to the query and not yet expanded**. Concretely: index `k` points at the next node to expand. We expand the node `n = best_L_nodes[k].id`: we take its out-neighbors from `_final_graph[n]`, compute each neighbor’s distance to the **query**, and insert them into `best_L_nodes` (kept sorted by distance, max L+1). When we insert a new node, we record the position `r` where it was inserted. After finishing the current node, we set `k = nk` if `nk <= k` (where `nk` is the smallest such `r`), otherwise `k++`. So we **jump back** to the position of the best newly inserted node if it is closer to the query than the next “in order” node. So at every step we expand the **current closest-to-query unexpanded node**. That can be the entry point first, then one of its neighbors (if it became the new closest), then possibly a neighbor of that neighbor, or another neighbor of the entry point—whatever is closest to the query among unexpanded. So we do explore the entry point’s neighbors and the neighbors’ neighbors, but in **distance-to-query order** (best-first), not in breadth order.
+
+3. **Per-node step:** For the node `n` at `k`: mark it expanded, add to `expanded_nodes_info`; load `des = _final_graph[n]`; for each neighbor `id` not in `inserted_into_pool`, compute distance to query; if list is full and distance ≥ L-th best, skip; else insert into `best_L_nodes` with `InsertIntoPool()`, set `nk = min(nk, r)`.
+
+4. **What stops the process:** The loop runs while `k < l`. We stop when every position in `best_L_nodes` has been expanded (`flag == false`), i.e. the frontier is exhausted.
+
+5. **Output:** `expanded_nodes_info` / `expanded_nodes_ids` are the candidate set. The caller then removes the query node, runs `prune_neighbors()` (at most R neighbors), and writes `_final_graph[node_id]`.
+
 #### Code Structure
 
 We mainly introduce the `src` folder, which contains the main code.
@@ -400,6 +468,7 @@ We mainly introduce the `src` folder, which contains the main code.
 ```bash
 src/
 ├── CMakeLists.txt
+├── graph_stats.cpp # graph-structure observability (Instrumentation 1)
 ├── index.cpp # in-memory Vamana index
 ├── ssd_index.cpp # on-disk index (search-only)
 ├── search # search algorithms, details in README-PipeANN.md
@@ -485,3 +554,12 @@ Hao Guo and Youyou Lu. Achieving Low-Latency Graph-Based Vector Search via Align
 ## Acknowledgments
 
 PipeANN is based on [DiskANN and FreshDiskANN](https://github.com/microsoft/DiskANN/tree/diskv2), we really appreciate it.
+
+
+build/tests/inspect_graph --disk-index /mnt/nvme/indices/siftsmall/siftsmall_disk.index --data-type float --adjacency-sample 20 --max-neighbors 64 --small-graph 20
+Graph structure summary: total_nodes=10000 active=10000 frozen=0 total_edges=640000 degree_min=64 degree_avg=64 degree_max=64 weak_count(deg<2)=0 entry_point=3732
+
+
+
+ sudo apt-get install -y systemtap-sdt-dev
+cd build && rm CMakeCache.txt && cmake .. -DPIPANN_OBSERVABILITY=ON && make -j4

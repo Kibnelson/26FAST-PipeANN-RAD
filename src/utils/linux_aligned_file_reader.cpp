@@ -1,5 +1,6 @@
 #ifndef USE_AIO
 #include "linux_aligned_file_reader.h"
+#include "observability.h"
 
 #include <cassert>
 #include <cstdint>
@@ -485,13 +486,19 @@ void LinuxAlignedFileReader::poll_wait(void *ctx) {
 #endif
 
 int LinuxAlignedFileReader::send_read_no_alloc(IORequest &req, void *ring) {
+  uint64_t page_id = req.offset / SECTOR_LEN;
 #ifndef READ_ONLY_TESTS
   if (!v2::cache.get(req.offset / SECTOR_LEN, (uint8_t *) req.buf)) {
+    PIPANN_PROBE_TIER_MISS(page_id);
+    PIPANN_PROBE_READ_PAGE_REQUEST(page_id, req.offset);
     send_io(req, ring, false);
   } else {
-    req.finished = true;  // mark as finished for cache miss
+    PIPANN_PROBE_TIER_HIT(page_id);
+    req.finished = true;
   }
 #else
+  PIPANN_PROBE_TIER_MISS(page_id);
+  PIPANN_PROBE_READ_PAGE_REQUEST(page_id, req.offset);
   send_io(req, ring, false);
 #endif
   return 1;
@@ -500,18 +507,27 @@ int LinuxAlignedFileReader::send_read_no_alloc(IORequest &req, void *ring) {
 int LinuxAlignedFileReader::send_read_no_alloc(std::vector<IORequest> &reqs, void *ring) {
 #ifndef READ_ONLY_TESTS
   std::vector<IORequest> disk_read_reqs;
-  // fetch from cache.
   for (auto &req : reqs) {
     if (req.offset % SECTOR_LEN != 0 || req.len != SECTOR_LEN) {
       LOG(ERROR) << "Unaligned read offset: " << req.offset << ", len: " << req.len;
     }
+    uint64_t page_id = req.offset / SECTOR_LEN;
     if (!v2::cache.get(req.offset / SECTOR_LEN, (uint8_t *) req.buf)) {
+      PIPANN_PROBE_TIER_MISS(page_id);
+      PIPANN_PROBE_READ_PAGE_REQUEST(page_id, req.offset);
       disk_read_reqs.push_back(req);
+    } else {
+      PIPANN_PROBE_TIER_HIT(page_id);
     }
   }
   send_io(disk_read_reqs, ring, false);
   return disk_read_reqs.size();
 #else
+  for (auto &req : reqs) {
+    uint64_t page_id = req.offset / SECTOR_LEN;
+    PIPANN_PROBE_TIER_MISS(page_id);
+    PIPANN_PROBE_READ_PAGE_REQUEST(page_id, req.offset);
+  }
   send_io(reqs, ring, false);
   return reqs.size();
 #endif

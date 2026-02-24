@@ -49,6 +49,23 @@ add_definitions(
 	# -DNAIVE_PIPE
 )
 
+# Observability: USDT probes for eBPF (requires sys/sdt.h, e.g. systemtap-sdt-dev)
+# Only enable USDT if the header is present; otherwise probes are no-ops.
+include(CheckIncludeFile)
+check_include_file("sys/sdt.h" HAVE_SYS_SDT_H)
+if(HAVE_SYS_SDT_H)
+	add_definitions(-DHAVE_SYS_SDT_H)
+	message(STATUS "sys/sdt.h found: USDT probes available when observability is enabled")
+else()
+	message(STATUS "sys/sdt.h not found: USDT probes will be no-ops (install systemtap-sdt-dev to enable)")
+endif()
+
+option(PIPANN_OBSERVABILITY "Enable USDT probes for eBPF observability" OFF)
+if(PIPANN_OBSERVABILITY)
+	add_definitions(-DPIPANN_OBSERVABILITY)
+	message(STATUS "PipeANN observability (USDT): enabled")
+endif()
+
 include_directories(
 	${PROJECT_SOURCE_DIR}/third_party/liburing/src/include
 )

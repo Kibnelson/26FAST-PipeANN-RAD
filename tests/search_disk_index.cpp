@@ -6,6 +6,7 @@
 #include <iostream>
 
 #include "log.h"
+#include "observability.h"
 #include "timer.h"
 #include "utils.h"
 #include "aux_utils.h"
@@ -79,6 +80,12 @@ int search_disk_index(int argc, char **argv) {
     std::cout << "beamwidth to be optimized for each L value" << std::endl;
   else
     std::cout << " beamwidth: " << beamwidth << std::endl;
+
+#if defined(PIPANN_OBSERVABILITY) && defined(HAVE_SYS_SDT_H)
+  std::cout << "[observability] USDT probes: enabled (attach with bpftrace)" << std::endl;
+#else
+  std::cout << "[observability] USDT probes: disabled (build with -DPIPANN_OBSERVABILITY=ON and sys/sdt.h)" << std::endl;
+#endif
 
   pipeann::load_bin<T>(query_bin, query, query_num, query_dim);
   // std::load_aligned_bin<T>(query_bin, query, query_num, query_dim, query_aligned_dim);

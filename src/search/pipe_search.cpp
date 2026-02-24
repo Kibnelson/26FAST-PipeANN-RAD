@@ -1,6 +1,7 @@
 #include "aligned_file_reader.h"
 #include "libcuckoo/cuckoohash_map.hh"
 #include "neighbor.h"
+#include "observability.h"
 #include "ssd_index.h"
 #include <malloc.h>
 #include <algorithm>
@@ -43,6 +44,13 @@ namespace pipeann {
   template<typename T, typename TagT>
   size_t SSDIndex<T, TagT>::pipe_search(const T *query1, const _u64 k_search, const _u32 mem_L, const _u64 l_search,
                                         TagT *res_tags, float *distances, const _u64 beam_width, QueryStats *stats) {
+    pipeann::set_io_context(pipeann::IoContext::SEARCH);
+    PIPANN_PROBE_QUERY_START(l_search);
+
+    // std::cout << "[observability] -------> pipe_search" << std::endl;
+
+    // std::cout << "beamwidth to be optimized for each L value" << std::endl;
+
     QueryBuffer<T> *query_buf = pop_query_buf(query1);
 #ifdef USE_AIO
     void *ctx = reader->get_ctx();
@@ -198,6 +206,7 @@ namespace pipeann {
       // lock the corresponding page.
       this->lock_idx(idx_lock_table, item.id, std::vector<uint32_t>(), true);
       const unsigned loc = id2loc(item.id), pid = loc_sector_no(loc);
+      PIPANN_PROBE_EXPAND_NODE(item.id, pid);
 
       uint64_t &cur_buf_idx = query_buf->sector_idx;
       auto buf = sector_scratch + cur_buf_idx * size_per_io;
@@ -383,6 +392,10 @@ namespace pipeann {
       t++;
     }
 
+    PIPANN_PROBE_QUERY_DONE(
+        (uint64_t) query_timer.elapsed(),
+        stats != nullptr ? (uint64_t) stats->n_ios : 0,
+        stats != nullptr ? (uint64_t) stats->n_hops : 0);
     push_query_buf(query_buf);
 
     if (stats != nullptr) {

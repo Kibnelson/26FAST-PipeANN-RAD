@@ -14,6 +14,7 @@
 #include <sys/syscall.h>
 #include "tsl/robin_set.h"
 
+
 namespace pipeann {
   template<typename T>
   DiskNode<T>::DiskNode(uint32_t id, T *coords, uint32_t *nhood) : id(id) {

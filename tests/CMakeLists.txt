@@ -38,3 +38,6 @@ target_link_libraries(search_disk_index_mem ${PROJECT_NAME})
 
 add_executable(pad_partition pad_partition.cpp)
 target_link_libraries(pad_partition ${PROJECT_NAME} )
+
+add_executable(inspect_graph inspect_graph.cpp)
+target_link_libraries(inspect_graph ${PROJECT_NAME})
