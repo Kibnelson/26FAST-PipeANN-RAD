@@ -124,12 +124,34 @@ namespace pipeann {
       return (sector_no - 1) * nnodes_per_sector + sector_off;
     }
 
+    // void init_query_buf(QueryBuffer<T> &buf) {
+    //   _u64 coord_alloc_size = ROUND_UP(MAX_N_CMPS * this->aligned_dim, 256);
+    //   pipeann::alloc_aligned((void **) &buf.coord_scratch, coord_alloc_size, 256);
+    //   pipeann::alloc_aligned((void **) &buf.sector_scratch, MAX_N_SECTOR_READS * SECTOR_LEN, SECTOR_LEN);
+    //   pipeann::alloc_aligned((void **) &buf.aligned_pq_coord_scratch, 32768 * 32 * sizeof(_u8), 256);
+    //   pipeann::alloc_aligned((void **) &buf.aligned_pqtable_dist_scratch, 25600 * sizeof(float), 256);
+    //   pipeann::alloc_aligned((void **) &buf.aligned_dist_scratch, 512 * sizeof(float), 256);
+    //   pipeann::alloc_aligned((void **) &buf.aligned_query_T, this->aligned_dim * sizeof(T), 8 * sizeof(T));
+    //   pipeann::alloc_aligned((void **) &buf.update_buf, (2 * MAX_N_EDGES + 1) * SECTOR_LEN,
+    //                          SECTOR_LEN);  // 2x for read + write
+
+    //   buf.visited = new tsl::robin_set<_u64>(4096);
+    //   buf.page_visited = new tsl::robin_set<unsigned>(4096);
+
+    //   memset(buf.sector_scratch, 0, MAX_N_SECTOR_READS * SECTOR_LEN);
+    //   memset(buf.coord_scratch, 0, coord_alloc_size);
+    //   memset(buf.aligned_query_T, 0, this->aligned_dim * sizeof(T));
+    //   memset(buf.update_buf, 0, (2 * MAX_N_EDGES + 1) * SECTOR_LEN);
+    // }
+
+
     void init_query_buf(QueryBuffer<T> &buf) {
       _u64 coord_alloc_size = ROUND_UP(MAX_N_CMPS * this->aligned_dim, 256);
       pipeann::alloc_aligned((void **) &buf.coord_scratch, coord_alloc_size, 256);
       pipeann::alloc_aligned((void **) &buf.sector_scratch, MAX_N_SECTOR_READS * SECTOR_LEN, SECTOR_LEN);
       pipeann::alloc_aligned((void **) &buf.aligned_pq_coord_scratch, 32768 * 32 * sizeof(_u8), 256);
-      pipeann::alloc_aligned((void **) &buf.aligned_pqtable_dist_scratch, 25600 * sizeof(float), 256);
+      _u64 pqtable_dist_size = (uint64_t) 256 * this->n_chunks * sizeof(float);
+      pipeann::alloc_aligned((void **) &buf.aligned_pqtable_dist_scratch, ROUND_UP(pqtable_dist_size, 256), 256);
       pipeann::alloc_aligned((void **) &buf.aligned_dist_scratch, 512 * sizeof(float), 256);
       pipeann::alloc_aligned((void **) &buf.aligned_query_T, this->aligned_dim * sizeof(T), 8 * sizeof(T));
       pipeann::alloc_aligned((void **) &buf.update_buf, (2 * MAX_N_EDGES + 1) * SECTOR_LEN,
@@ -151,6 +173,10 @@ namespace pipeann {
         data = this->thread_data_queue.pop();
       }
 
+      // if (unlikely(data->aligned_query_T == nullptr)) {
+      //   LOG(ERROR) << "QueryBuffer has null aligned_query_T (corrupted or uninitialized)";
+      //   crash();
+      // }
       if (likely(query != nullptr)) {
         if (data_is_normalized) {
           // Data has been normalized. Normalize search vector too.

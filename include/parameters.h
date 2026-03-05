@@ -1,4 +1,5 @@
 #pragma once
+#include <cstdlib>
 #include <sstream>
 #include <typeinfo>
 #include <unordered_map>
@@ -8,12 +9,24 @@ namespace pipeann {
   class Parameters {
    public:
     Parameters() {
+      // int *p = (int *) std::malloc(sizeof(int));
       int *p = new int;
       *p = 0;
       params["num_threads"] = p;
     }
 
     template<typename ParamType>
+
+    // inline void Set(const std::string &name, const ParamType &value) {
+    //   ParamType *ptr = (ParamType *) std::malloc(sizeof(ParamType));
+    //   *ptr = value;
+    //   if (params.find(name) != params.end()) {
+    //     std::free(params[name]);
+    //   }
+
+    //   params[name] = (void *) ptr;
+    // }
+
     inline void Set(const std::string &name, const ParamType &value) {
       //      ParamType *ptr = (ParamType *) malloc(sizeof(ParamType));
       ParamType *ptr = new ParamType;
@@ -53,6 +66,8 @@ namespace pipeann {
       for (auto iter = params.begin(); iter != params.end(); iter++) {
         if (iter->second != nullptr)
           free(iter->second);
+          // std::free(iter->second);
+
       }
     }
 
