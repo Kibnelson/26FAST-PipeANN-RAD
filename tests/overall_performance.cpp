@@ -20,7 +20,7 @@
 #include "math_utils.h"
 #include "partition_and_pq.h"
 #include "utils.h"
-
+#include <cstdlib>
 #include <sys/mman.h>
 #include <sys/stat.h>
 #include <unistd.h>
@@ -253,6 +253,138 @@ void get_trace(std::string data_bin, uint64_t l_start, uint64_t r_start, uint64_
   reader.read((char *) data_load.data(), sizeof(T) * n * data_dim);
 }
 
+// template<typename T, typename TagT>
+// void update(const std::string &data_bin, const unsigned L_disk, int step, const unsigned nodes_to_cache,
+//             std::string &save_path, const std::string &query_file, std::string &truthset_file, const int recall_at,
+//             std::vector<_u64> Lsearch, const unsigned beam_width, pipeann::Distance<T> *dist_cmp) {
+//   pipeann::Parameters paras;
+//   paras.Set<unsigned>("L_disk", L_disk);
+//   paras.Set<unsigned>("R_disk", 0);
+//   paras.Set<float>("alpha_disk", 1.2);
+//   paras.Set<unsigned>("C", 384);
+//   paras.Set<unsigned>("beamwidth", beam_width);
+//   paras.Set<unsigned>("nodes_to_cache", 0);
+//   paras.Set<unsigned>("num_threads", 128);  // more for less contention of thread data.
+//   std::vector<T> data_load;
+//   size_t dim{}, aligned_dim{};
+
+//   pipeann::Timer timer;
+
+//   std::cout << "Loading queries " << std::endl;
+//   T *query = NULL;
+//   size_t query_num, query_dim, query_aligned_dim;
+//   pipeann::load_aligned_bin<T>(query_file, query, query_num, query_dim, query_aligned_dim);
+
+//   dim = query_dim;
+//   aligned_dim = query_aligned_dim;
+//   pipeann::Metric metric = pipeann::Metric::L2;
+//   pipeann::DynamicSSDIndex<T, TagT> sync_index(paras, save_path, save_path + "_merge", dist_cmp, metric);
+
+//   std::cout << "Searching before inserts: " << std::endl;
+
+//   uint64_t res = 0;
+
+//   std::string currentFileName = GetTruthFileName(truthset_file, res);
+//   begin_time = globalTimer.elapsed() / 1.0e6f;
+//   ShowMemoryStatus(sync_index._disk_index_prefix_in);
+
+//   std::vector<double> ref_diskio;
+//   for (uint64_t j = 0; j < Lsearch.size(); ++j) {
+//     double diskio = 0;
+//     sync_search_kernel(query, query_num, query_aligned_dim, recall_at, Lsearch[j], beam_width, sync_index,
+//                        currentFileName, false, true, diskio);
+//     ref_diskio.push_back(diskio);
+//   }
+
+//   int batch = 100;
+//   int inMemorySize = 0;
+//   std::future<void> merge_future;
+//   uint64_t index_npts = sync_index._disk_index->num_points;
+//   uint64_t vecs_per_step = index_npts / step;
+//   for (int i = 0; i < batch; i++) {
+//     std::cout << "Batch: " << i << " Total Batch : " << batch << std::endl;
+//     std::vector<unsigned> insert_vec;
+//     std::vector<unsigned> delete_vec;
+
+//     /**Prepare for update*/
+//     uint64_t st = vecs_per_step * i;
+//     get_trace<T, TagT>(data_bin, st, st + index_npts, vecs_per_step, delete_vec, insert_vec, data_load);
+
+//     std::future<void> insert_future = std::async(std::launch::async, insertion_kernel<T, TagT>, data_load.data(),
+//                                                  std::ref(sync_index), std::ref(insert_vec), aligned_dim);
+
+//     std::future<void> delete_future = std::async(std::launch::async, deletion_kernel<T, TagT>, data_load.data(),
+//                                                  std::ref(sync_index), std::ref(delete_vec), aligned_dim);
+
+//     int total_queries = 0;
+//     std::future_status insert_status;
+//     std::future_status delete_status;
+//     do {
+//       insert_status = insert_future.wait_for(std::chrono::seconds(5));
+//       delete_status = delete_future.wait_for(std::chrono::seconds(5));
+//       if (insert_status == std::future_status::deferred || delete_status == std::future_status::deferred) {
+//         std::cout << "deferred\n";
+//       } else if (insert_status == std::future_status::timeout || delete_status == std::future_status::timeout) {
+//         ShowMemoryStatus(sync_index._disk_index_prefix_in);
+//         double dummy;
+//         sync_search_kernel(query, query_num, query_aligned_dim, recall_at, Lsearch[0], beam_width, sync_index,
+//                            currentFileName, false, false, dummy);
+//         total_queries += query_num;
+//         std::cout << "Queries processed: " << total_queries << std::endl;
+//       }
+//       if (insert_status == std::future_status::ready) {
+//         std::cout << "Insertions complete!\n";
+//       }
+//       if (delete_status == std::future_status::ready) {
+//         std::cout << "Deletions complete!\n";
+//       }
+//     } while (insert_status != std::future_status::ready || delete_status != std::future_status::ready);
+
+//     inMemorySize += insert_vec.size();
+
+//     std::cout << "Search after update, current vector number: " << res << std::endl;
+
+//     res += vecs_per_step;
+//     currentFileName = GetTruthFileName(truthset_file, res);
+
+//     std::vector<double> disk_ios;
+//     for (uint64_t j = 0; j < Lsearch.size(); ++j) {
+//       double diskio = 0;
+//       sync_search_kernel(query, query_num, query_aligned_dim, recall_at, Lsearch[j], beam_width, sync_index,
+//                          currentFileName, false, true, diskio);
+//       disk_ios.push_back(diskio);
+//     }
+
+//     if (i == batch - 1) {
+//       std::cout << "Done" << std::endl;
+//       exit(0);
+//     } else if (i % MERGE_ROUND == MERGE_ROUND - 1 || disk_ios[0] / ref_diskio[0] > MERGE_IO_THRESHOLD) {
+//       std::cout << "Begin Merge" << std::endl;
+//       merge_future = std::async(std::launch::async, merge_kernel<T, TagT>, std::ref(sync_index), std::ref(save_path));
+//       std::this_thread::sleep_for(std::chrono::seconds(5));
+//       std::cout << "Sending Merge" << std::endl;
+//       inMemorySize = 0;
+//       std::future_status merge_status;
+//       do {
+//         merge_status = merge_future.wait_for(std::chrono::seconds(10));
+//         double dummy = 0;
+//         ShowMemoryStatus(sync_index._disk_index_prefix_in);
+//         sync_search_kernel(query, query_num, query_aligned_dim, recall_at, Lsearch[0], beam_width, sync_index,
+//                            currentFileName, false, false, dummy);
+//       } while (merge_status != std::future_status::ready);
+
+//       ref_diskio.clear();
+//       for (uint32_t j = 0; j < Lsearch.size(); ++j) {
+//         double diskio;
+//         sync_search_kernel(query, query_num, query_aligned_dim, recall_at, Lsearch[j], beam_width, sync_index,
+//                            currentFileName, false, true, diskio);
+//         ref_diskio.push_back(diskio);
+//       }
+//       std::cout << "Merge finished " << std::endl;
+//     }
+//   }
+// }
+
 template<typename T, typename TagT>
 void update(const std::string &data_bin, const unsigned L_disk, int step, const unsigned nodes_to_cache,
             std::string &save_path, const std::string &query_file, std::string &truthset_file, const int recall_at,
@@ -296,13 +428,45 @@ void update(const std::string &data_bin, const unsigned L_disk, int step, const 
     ref_diskio.push_back(diskio);
   }
 
+  uint64_t max_queries = 0;
+  const char *max_q_env = std::getenv("OVERALL_MAX_QUERIES");
+  if (max_q_env != nullptr) {
+    long long v = std::atoll(max_q_env);
+    if (v > 0) {
+      max_queries = static_cast<uint64_t>(v);
+      std::cout << "Query cap: OVERALL_MAX_QUERIES=" << max_queries
+                << " (per gt file; each batch uses at most this many queries)" << std::endl;
+    }
+  }
+  uint64_t queries_so_far = Lsearch.size() * query_num;  // initial "Searching before inserts" runs
+  // Per-file cap: start at 0 so polling can run (10K, 20K) and we see "Queries processed" progression
+  uint64_t queries_this_phase = 0;
+
   int batch = 100;
+  const char *max_batch_env = std::getenv("OVERALL_MAX_BATCHES");
+  if (max_batch_env != nullptr) {
+    int cap = std::atoi(max_batch_env);
+    if (cap > 0 && cap <= batch) {
+      batch = cap;
+      std::cout << "Capped to " << batch << " batches (OVERALL_MAX_BATCHES=" << max_batch_env << ")" << std::endl;
+    }
+  }
   int inMemorySize = 0;
   std::future<void> merge_future;
   uint64_t index_npts = sync_index._disk_index->num_points;
   uint64_t vecs_per_step = index_npts / step;
+  const char *vecs_env = std::getenv("OVERALL_VECS_PER_STEP");
+  if (vecs_env != nullptr) {
+    long long v = std::atoll(vecs_env);
+    if (v > 0) {
+      vecs_per_step = static_cast<uint64_t>(v);
+      std::cout << "Using OVERALL_VECS_PER_STEP=" << vecs_per_step << " (default would be " << (index_npts / step)
+                << ")" << std::endl;
+    }
+  }
   for (int i = 0; i < batch; i++) {
     std::cout << "Batch: " << i << " Total Batch : " << batch << std::endl;
+    if (max_queries > 0) queries_this_phase = 0;  // allow up to 20K polling this batch (see "Queries processed")
     std::vector<unsigned> insert_vec;
     std::vector<unsigned> delete_vec;
 
@@ -317,43 +481,60 @@ void update(const std::string &data_bin, const unsigned L_disk, int step, const 
                                                  std::ref(sync_index), std::ref(delete_vec), aligned_dim);
 
     int total_queries = 0;
-    std::future_status insert_status;
-    std::future_status delete_status;
+    std::future_status insert_status = std::future_status::deferred;
+    std::future_status delete_status = std::future_status::deferred;
+    bool insert_done_reported = false, delete_done_reported = false;
     do {
       insert_status = insert_future.wait_for(std::chrono::seconds(5));
       delete_status = delete_future.wait_for(std::chrono::seconds(5));
       if (insert_status == std::future_status::deferred || delete_status == std::future_status::deferred) {
         std::cout << "deferred\n";
       } else if (insert_status == std::future_status::timeout || delete_status == std::future_status::timeout) {
-        ShowMemoryStatus(sync_index._disk_index_prefix_in);
-        double dummy;
-        sync_search_kernel(query, query_num, query_aligned_dim, recall_at, Lsearch[0], beam_width, sync_index,
-                           currentFileName, false, false, dummy);
-        total_queries += query_num;
-        std::cout << "Queries processed: " << total_queries << std::endl;
+        bool run_search =
+            (max_queries == 0 || (queries_this_phase + total_queries + query_num <= max_queries));
+        if (run_search) {
+          ShowMemoryStatus(sync_index._disk_index_prefix_in);
+          double dummy;
+          sync_search_kernel(query, query_num, query_aligned_dim, recall_at, Lsearch[0], beam_width, sync_index,
+                             currentFileName, false, false, dummy);
+          total_queries += query_num;
+          std::cout << "Queries processed: " << total_queries << std::endl;
+        }
       }
-      if (insert_status == std::future_status::ready) {
+      if (insert_status == std::future_status::ready && !insert_done_reported) {
         std::cout << "Insertions complete!\n";
+        insert_done_reported = true;
       }
-      if (delete_status == std::future_status::ready) {
+      if (delete_status == std::future_status::ready && !delete_done_reported) {
         std::cout << "Deletions complete!\n";
+        delete_done_reported = true;
       }
     } while (insert_status != std::future_status::ready || delete_status != std::future_status::ready);
 
-    inMemorySize += insert_vec.size();
+    queries_this_phase += total_queries;  // count polling searches toward this gt file's cap
 
-    std::cout << "Search after update, current vector number: " << res << std::endl;
+    inMemorySize += insert_vec.size();
 
     res += vecs_per_step;
     currentFileName = GetTruthFileName(truthset_file, res);
+    queries_this_phase = 0;  // new gt file: reset per-file query count
+    std::cout << "Batch " << i << " complete: " << vecs_per_step << " insert + " << vecs_per_step
+              << " delete done. Search after update: " << res << " vectors, using truth " << currentFileName
+              << std::endl;
 
     std::vector<double> disk_ios;
+    uint64_t phase_queries_before = queries_this_phase;
     for (uint64_t j = 0; j < Lsearch.size(); ++j) {
+      if (max_queries > 0 && queries_this_phase + query_num > max_queries) break;
       double diskio = 0;
       sync_search_kernel(query, query_num, query_aligned_dim, recall_at, Lsearch[j], beam_width, sync_index,
                          currentFileName, false, true, diskio);
       disk_ios.push_back(diskio);
+      queries_this_phase += query_num;
+      if (max_queries > 0) std::cout << "Queries processed: " << (queries_this_phase - phase_queries_before) << std::endl;
     }
+
+    queries_so_far += total_queries + disk_ios.size() * query_num;
 
     if (i == batch - 1) {
       std::cout << "Done" << std::endl;
@@ -384,7 +565,6 @@ void update(const std::string &data_bin, const unsigned L_disk, int step, const 
     }
   }
 }
-
 int main(int argc, char **argv) {
   if (argc < 11) {
     std::cout << "Correct usage: " << argv[0] << " <type[int8/uint8/float]> <data_bin> <L_disk> "
