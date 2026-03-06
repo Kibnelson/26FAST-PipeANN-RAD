@@ -168,12 +168,22 @@ prepare_ground_truth() {
   if [[ ! -f "$truth_bin" ]]; then
     "$utils/ivecs_to_bin" "$idx_ivecs" "$truth_bin"
   fi
+  # # batch_npts must be >= index size so each range [st, st+batch_npts) contains the full index and every query has >=10 gt.
+  # # step=1M gives gt_0.bin, gt_1000000.bin, ... for overall_performance.
+  # local tot_npts=$((BASE_NPTS + 1000000))
+  # build/tests/gt_update "$truth_bin" "$tot_npts" "$BASE_NPTS" 10 "$TRUTHSET_DIR" 0 1000000
+  # log "Truthset: $(ls "$TRUTHSET_DIR"/gt_*.bin 2>/dev/null | wc -l) files"
+  # ls -lh "$TRUTHSET_DIR/gt_0.bin" "$TRUTHSET_DIR/gt_1000000.bin" 2>/dev/null || true
+
+
   # batch_npts must be >= index size so each range [st, st+batch_npts) contains the full index and every query has >=10 gt.
-  # step=1M gives gt_0.bin, gt_1000000.bin, ... for overall_performance.
+  # step=100K gives gt_0.bin, gt_100000.bin, ... gt_900000.bin (10 checkpoints over 1M cadence) for overall_performance.
   local tot_npts=$((BASE_NPTS + 1000000))
-  build/tests/gt_update "$truth_bin" "$tot_npts" "$BASE_NPTS" 10 "$TRUTHSET_DIR" 0 1000000
+  build/tests/gt_update "$truth_bin" "$tot_npts" "$BASE_NPTS" 10 "$TRUTHSET_DIR" 0 100000
   log "Truthset: $(ls "$TRUTHSET_DIR"/gt_*.bin 2>/dev/null | wc -l) files"
-  ls -lh "$TRUTHSET_DIR/gt_0.bin" "$TRUTHSET_DIR/gt_1000000.bin" 2>/dev/null || true
+  ls -lh "$TRUTHSET_DIR/gt_0.bin" "$TRUTHSET_DIR/gt_900000.bin" 2>/dev/null || true
+
+
 }
 
 run_overall_performance() {
